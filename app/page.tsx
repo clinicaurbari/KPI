@@ -45,4 +45,66 @@ export default function Home(){
 function Kpi({title,value,note,icon,tone}:{title:string;value:string|number;note:string;icon:React.ReactNode;tone:string}){return <div className="kpi-card"><div className={`kpi-icon ${tone}`}>{icon}</div><div className="kpi-label">{title}</div><div className="kpi-value">{value}</div><div className="kpi-note">{note}</div></div>}
 function Empty({text}:{text:string}){return <div className="empty"><BarChart3 size={26}/><p>{text}</p></div>}
 function ObjectiveTable({rows,onSelect,onValidate}:{rows:Objective[];onSelect?:(o:Objective)=>void;onValidate?:(o:Objective)=>void}){if(!rows.length)return <Empty text="No hay objetivos que coincidan con los filtros."/>;return <div className="table-scroll"><table><thead><tr><th>OBJETIVO / ÁREA</th><th>PRIORIDAD</th><th>AVANCE</th><th>TIEMPO</th><th>ESTADO</th><th>SEMÁFORO</th><th>FECHA LÍMITE</th>{(onSelect||onValidate)&&<th>ACCIÓN</th>}</tr></thead><tbody>{rows.map(o=><tr key={o.id}><td><b className="objective-title">{o.titulo}</b><small className="table-sub" ><i style={{background:o.area_color}}/>{o.area_nombre}</small></td><td><span className={`priority priority-${o.prioridad}`}>{o.prioridad}</span></td><td><div className="advance-cell"><b>{Math.round(Number(o.porcentaje_avance))}%</b><div className="progress"><i style={{width:`${o.porcentaje_avance}%`}}/></div></div></td><td><div className="time-cell"><span>{Number(o.dias_transcurridos).toFixed(0)} / {Number(o.dias_estimados).toFixed(0)} días</span><small>{Number(o.horas_ejecutadas).toFixed(1)} h ejecutadas</small></div></td><td><span className="state-text">{statusLabel[o.estado]||o.estado}</span></td><td><span className={`signal signal-${o.semaforo}`}><i/>{o.semaforo==='verde'?'En meta':o.semaforo==='amarillo'?'Alerta':'Crítico'}</span></td><td>{new Date(o.fecha_limite+'T12:00:00').toLocaleDateString('es-BO')}</td>{(onSelect||onValidate)&&<td>{onSelect&&<button className="table-action" onClick={()=>onSelect(o)}>Actualizar</button>}{onValidate&&o.estado==='concluido_pendiente_validacion'&&<button className="table-action" onClick={()=>onValidate(o)}>Validar y cerrar</button>}</td>}</tr>)}</tbody></table></div>}
-function Minutes({objectives,profile,supabase,onSaved}:{objectives:Objective[];profile:Profile|null;supabase:any;onSaved:()=>void}){const [busy,setBusy]=useState(false);const [period,setPeriod]=useState(7);const [title,setTitle]=useState('Acta semanal del Comité Operativo');const [notice,setNotice]=useState('');async function generate(){if(!supabase||!profile)return;setBusy(true);setNotice('');const end=new Date(),start=new Date();start.setDate(end.getDate()-period);const selected=objectives.filter(o=>o.ultima_actualizacion&&new Date(o.ultima_actualizacion)>=start);const por_area=selected.reduce((acc:any,o)=>{(acc[o.area_nombre]??=[]).push(o);return acc;},{});const payload={resumen:{total:selected.length,criticos:selected.filter(o=>o.semaforo==='rojo').length,alertas:selected.filter(o=>o.semaforo==='amarillo').length},por_area};const {error}=await supabase.from('actas').insert({titulo:title,periodo_desde:start.toISOString().slice(0,10),periodo_hasta:end.toISOString().slice(0,10),contenido:payload,compromisos:[],generado_por:profile.id});setBusy(false);if(error){setNotice(error.message);return;}setNotice('Acta registrada. Puedes imprimir esta vista o guardarla como PDF desde el navegador.');onSaved();}return <section className="panel minutes-panel"><div className="minutes-intro"><div className="minutes-icon"><FileText size={26}/></div><div><h3>Generador de actas del Comité</h3><p>Consolida los movimientos recientes, identifica desviaciones y prepara la documentación para la reunión.</p></div></div><div className="minutes-controls"><label>Título del acta<input value={title} onChange={e=>setTitle(e.target.value)}/></label><label>Periodo a consolidar<select value={period} onChange={e=>setPeriod(Number(e.target.value))}><option value={7}>Últimos 7 días</option><option value={14}>Últimos 14 días</option><option value={30}>Últimos 30 días</option></select></label><button className="primary" onClick={generate} disabled={busy}>{busy?'Generando…':<><FileText size={16}/> Generar acta</>}</button></div>{notice&&<div className="notice">{notice}</div>}<div className="minutes-preview"><div className="preview-head"><div><span className="eyebrow">VISTA PREVIA DE CONTENIDO</span><h3>{title}</h3><p>Objetivos con actividad reciente agrupados por área.</p></div><button className="secondary" onClick={()=>window.print()}><FileText size={16}/> Imprimir / PDF</button></div><ObjectiveTable rows={objectives.filter(o=>o.semaforo==='rojo'||o.semaforo==='amarillo')}/><p className="preview-note">Los compromisos acordados deben completarse durante la reunión en la versión ampliada del acta. La exportación Excel y la edición formal de compromisos están previstas para la siguiente iteración.</p></div></section>}
+function Minutes({objectives,profile,supabase,onSaved}:{objectives:Objective[];profile:Profile|null;supabase:any;onSaved:()=>void}) {
+ const [busy,setBusy]=useState(false);
+ const [period,setPeriod]=useState(7);
+ const [title,setTitle]=useState('Acta semanal del Comité Operativo');
+ const [notice,setNotice]=useState('');
+ const recentObjectives=objectives.filter(o=>{
+  if(!o.ultima_actualizacion)return false;
+  const cutoff=new Date();
+  cutoff.setDate(cutoff.getDate()-period);
+  return new Date(o.ultima_actualizacion)>=cutoff;
+ });
+ async function generate(){
+  if(!supabase||!profile)return;
+  setBusy(true);
+  setNotice('');
+  const end=new Date(),start=new Date();
+  start.setDate(end.getDate()-period);
+  const por_area=recentObjectives.reduce((acc:any,o)=>{
+   (acc[o.area_nombre]??=[]).push(o);
+   return acc;
+  },{});
+  const payload={
+   resumen:{
+    total:recentObjectives.length,
+    criticos:recentObjectives.filter(o=>o.semaforo==='rojo').length,
+    alertas:recentObjectives.filter(o=>o.semaforo==='amarillo').length,
+   },
+   por_area,
+  };
+  const {error}=await supabase.from('actas').insert({
+   titulo:title,
+   periodo_desde:start.toISOString().slice(0,10),
+   periodo_hasta:end.toISOString().slice(0,10),
+   contenido:payload,
+   compromisos:[],
+   generado_por:profile.id,
+  });
+  setBusy(false);
+  if(error){setNotice(error.message);return;}
+  setNotice('Acta registrada. Puedes imprimir esta vista o guardarla como PDF desde el navegador.');
+  onSaved();
+ }
+ return <section className="panel minutes-panel">
+  <div className="minutes-intro">
+   <div className="minutes-icon"><FileText size={26}/></div>
+   <div><h3>Generador de actas del Comité</h3><p>Consolida los movimientos recientes, identifica desviaciones y prepara la documentación para la reunión.</p></div>
+  </div>
+  <div className="minutes-controls">
+   <label>Título del acta<input value={title} onChange={e=>setTitle(e.target.value)}/></label>
+   <label>Periodo a consolidar<select value={period} onChange={e=>setPeriod(Number(e.target.value))}><option value={7}>Últimos 7 días</option><option value={14}>Últimos 14 días</option><option value={30}>Últimos 30 días</option></select></label>
+   <button className="primary" onClick={generate} disabled={busy}>{busy?'Generando…':<><FileText size={16}/> Generar acta</>}</button>
+  </div>
+  {notice&&<div className="notice">{notice}</div>}
+  <div className="minutes-preview">
+   <div className="preview-head">
+    <div><span className="eyebrow">VISTA PREVIA DE CONTENIDO</span><h3>{title}</h3><p>Objetivos con actividad reciente agrupados por área.</p></div>
+    <button className="secondary" onClick={()=>window.print()}><FileText size={16}/> Imprimir / PDF</button>
+   </div>
+   <ObjectiveTable rows={recentObjectives}/>
+   <p className="preview-note">Los compromisos acordados deben completarse durante la reunión en la versión ampliada del acta. La exportación Excel y la edición formal de compromisos están previstas para la siguiente iteración.</p>
+  </div>
+ </section>;
+}
